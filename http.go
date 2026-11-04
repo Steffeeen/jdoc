@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	_ "embed"
+	"encoding/base64"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -17,6 +19,7 @@ type pageData struct {
 	Latest  int
 	Message string
 	Results []result
+	Nonce   string
 }
 
 func (c *catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +57,16 @@ func (c *catalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				data.Message = "Multiple matches. Choose a reference below."
 			}
 		}
+	}
+	if len(data.Results) > 0 {
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			slog.Error("generate script nonce", "error", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		data.Nonce = base64.StdEncoding.EncodeToString(nonce[:])
+		w.Header().Set("Content-Security-Policy", w.Header().Get("Content-Security-Policy")+"; script-src 'nonce-"+data.Nonce+"'")
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)

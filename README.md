@@ -45,6 +45,8 @@ curl -i --get --data-urlencode 'q=17 optionallong#orelse' http://localhost:8080/
 
 One match produces a `302` redirect. Ambiguous classes and overloads produce an HTML choices page. No match or an unindexed version returns `404`; invalid input returns `400`. Other paths return `404`, and unsupported methods return `405`.
 
+The empty search form focuses the search box automatically. On an ambiguous search, the first result receives focus instead. Use Up/Down to move between results, Home/End to jump to the first/last result, and Enter to follow the focused link. Tab navigation still works normally. Arrow-key navigation uses a small inline script authorized by a per-response CSP nonce; links remain usable without JavaScript.
+
 An unversioned query searches **only the latest indexed JDK**, with no fallback for removed APIs. Explicit versions never fall back. Member lookup covers declared indexed members, including fields and constructors, but does not resolve inherited members. For overloads, use the parameter types displayed in the choices page; signatures may vary between Javadoc versions.
 
 ## Discovery

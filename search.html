@@ -25,6 +25,7 @@ input:focus-visible,button:focus-visible,a:focus-visible { outline:3px solid var
 ul { list-style:none; padding:0; margin:32px 0; }
 li { border-bottom:1px solid var(--line); }
 li a { display:block; padding:14px 0; overflow-wrap:anywhere; color:var(--accent); }
+li a:focus { outline:3px solid var(--accent); outline-offset:3px; background:var(--ink); color:var(--bg); }
 footer { margin-top:64px; padding-top:18px; border-top:1px solid var(--line); font-size:12px; }
 @media (max-width:500px) { main { padding:28px 18px; } header { margin-bottom:44px; } .search { flex-direction:column; } button { align-self:flex-start; } }
 @media (prefers-color-scheme:dark) { :root { --bg:#14241f; --ink:#e4e8da; --muted:#a8b9ac; --line:#43564b; --accent:#9dd6af; } }
@@ -33,9 +34,29 @@ footer { margin-top:64px; padding-top:18px; border-top:1px solid var(--line); fo
 <body><main>
 <form action="/" method="get">
 <label for="q">Class or class#member</label>
-<div class="search"><input id="q" name="q" value="{{.Query}}" placeholder="optionallong#orelse" maxlength="1024" required autocomplete="off" spellcheck="false"><button type="submit">Look up &rarr;</button></div>
+<div class="search"><input id="q" name="q" value="{{.Query}}" placeholder="optionallong#orelse" maxlength="1024" required autocomplete="off" spellcheck="false"{{if not .Query}} autofocus{{end}}><button type="submit">Look up &rarr;</button></div>
 </form>
 {{if .Message}}<p class="message" role="status">{{.Message}}</p>{{end}}
-{{if .Results}}<ul aria-label="Matching Javadocs">{{range .Results}}<li><a href="{{.URL}}">{{.Label}}</a></li>{{end}}</ul>{{end}}
+{{if .Results}}<ul id="results" aria-label="Matching Javadocs">{{range $i, $result := .Results}}<li><a href="{{.URL}}"{{if eq $i 0}} autofocus{{end}}>{{.Label}}</a></li>{{end}}</ul>
+<script nonce="{{.Nonce}}">
+const results = document.getElementById('results');
+const links = Array.from(results.querySelectorAll('a'));
+results.addEventListener('keydown', (event) => {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const index = links.indexOf(document.activeElement);
+  if (index < 0) return;
+  let next;
+  switch (event.key) {
+    case 'ArrowDown': next = Math.min(index + 1, links.length - 1); break;
+    case 'ArrowUp': next = Math.max(index - 1, 0); break;
+    case 'Home': next = 0; break;
+    case 'End': next = links.length - 1; break;
+    default: return;
+  }
+  event.preventDefault();
+  links[next].focus({ preventScroll: true });
+  links[next].scrollIntoView({ block: 'nearest' });
+});
+</script>{{end}}
 <footer>Current default: JDK {{.Latest}}.</footer>
 </main></body></html>

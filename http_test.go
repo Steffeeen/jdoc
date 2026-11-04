@@ -54,12 +54,12 @@ func TestServeHTTPHome(t *testing.T) {
 	}
 	body := w.Body.String()
 	for _, want := range []string{
-		`<!doctype html>`, `<html lang="en">`, `<main>`, `<h1>`,
+		`<!doctype html>`, `<html lang="en">`, `<main>`,
 		`name="viewport" content="width=device-width, initial-scale=1"`,
 		`<form action="/" method="get">`, `<label for="q">`, `id="q" name="q"`,
 		`maxlength="1024" required`, `<button type="submit">`,
 		`@media (max-width:500px)`, `flex-direction:column`, `:focus-visible`,
-		`Default: JDK 21.`, `Explicit versions stay pinned.`,
+		`Current default: JDK 21.`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("home missing %q", want)
@@ -130,7 +130,7 @@ func TestServeHTTPAmbiguousResults(t *testing.T) {
 				t.Fatal(err)
 			}
 			body := w.Body.String()
-			links := regexp.MustCompile(`<li><a href="([^"]+)">([^<]+)</a></li>`).FindAllStringSubmatch(body, -1)
+			links := regexp.MustCompile(`<li><a href="([^"]+)"(?: autofocus)?>([^<]+)</a></li>`).FindAllStringSubmatch(body, -1)
 			matches := c.versions[21].search(q)
 			if len(links) != len(matches) || len(links) != 2 {
 				t.Fatalf("got %d links; want 2", len(links))
@@ -143,6 +143,44 @@ func TestServeHTTPAmbiguousResults(t *testing.T) {
 			}
 			if !strings.Contains(body, `role="status"`) {
 				t.Error("ambiguity message lacks accessible status role")
+			}
+		})
+	}
+}
+
+func TestServeHTTPFocusAndNavigation(t *testing.T) {
+	for _, input := range []string{"", "Date", "String#valueOf", "Missing", "String#"} {
+		t.Run(input, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			httpTestCatalog().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?q="+url.QueryEscape(input), nil))
+			body := w.Body.String()
+			inputFocused := regexp.MustCompile(`<input[^>]* autofocus[^>]*>`).MatchString(body)
+			if inputFocused != (input == "") {
+				t.Errorf("search autofocus = %v for query %q", inputFocused, input)
+			}
+			results := regexp.MustCompile(`<li><a[^>]* autofocus>`).FindAllString(body, -1)
+			ambiguous := input == "Date" || input == "String#valueOf"
+			if !ambiguous {
+				if len(results) != 0 || strings.Contains(body, "<script") {
+					t.Error("non-result page includes result focus or navigation script")
+				}
+				return
+			}
+			if len(results) != 1 || !strings.Contains(body, `<ul id="results" aria-label="Matching Javadocs"><li><a href=`) {
+				t.Fatal("expected exactly one focused result in navigation list")
+			}
+			first := regexp.MustCompile(`<ul id="results"[^>]*><li><a[^>]* autofocus>`)
+			if !first.MatchString(body) {
+				t.Error("first result does not receive autofocus")
+			}
+			script := regexp.MustCompile(`<script nonce="([^"]+)">`).FindStringSubmatch(body)
+			if len(script) != 2 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'nonce-"+script[1]+"'") {
+				t.Fatal("navigation script must have a nonce authorized by CSP")
+			}
+			for _, key := range []string{"ArrowDown", "ArrowUp", "Home", "End"} {
+				if !strings.Contains(body, "case '"+key+"':") {
+					t.Errorf("missing keyboard handler for %s", key)
+				}
 			}
 		})
 	}
