@@ -30,7 +30,7 @@ docker run --rm --name jdoc -p 127.0.0.1:8080:8080 jdoc
 
 ## Search
 
-The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is exact and case-insensitive.
+The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is case-insensitive. Class names are exact; member names fall back to prefix matching when the matched class has no exact member-name match. Explicit signatures remain exact.
 
 | Query | Meaning |
 | --- | --- |
@@ -43,6 +43,9 @@ The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is exact 
 | `map.entry` | Nested type |
 | `string#valueof` | All matching overloads |
 | `string#valueof(int)` | Specific overload |
+| `arraylist#ad` | Members whose names start with `ad`, including their overloads |
+
+For example, `arraylist#ad` includes `add`, `addAll`, and other indexed `add...` members. `arraylist#add` matches only the exact `add` overloads, not `addAll`. Prefixes are checked against the matched class's existing member map without retaining an additional prefix index or adding query strings to the string table. Class-name prefixes and substring matching are not supported.
 
 For direct URLs, encode `#` as `%23` and spaces as `%20` or `+`. The form handles encoding automatically. For example:
 

@@ -2,9 +2,71 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
+
+func TestMemberPrefixSearch(t *testing.T) {
+	l := &loader{}
+	types := []indexEntry{{Package: "java.util", Label: "ArrayList", Module: "java.base"}}
+	members := []indexEntry{
+		{Package: "java.util", Class: "ArrayList", Label: "add(E)"},
+		{Package: "java.util", Class: "ArrayList", Label: "add(int,E)"},
+		{Package: "java.util", Class: "ArrayList", Label: "addAll(Collection)"},
+		{Package: "java.util", Class: "ArrayList", Label: "addFirst(E)"},
+		{Package: "java.util", Class: "ArrayList", Label: "ADDITIONS"},
+		{Package: "java.util", Class: "ArrayList", Label: "remove(E)"},
+	}
+	idx, err := l.buildIndex(21, l.root(21), types, members, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		input string
+		want  []string
+	}{
+		{"ArrayList#AD", []string{"ADDITIONS", "add(E)", "add(int,E)", "addAll(Collection)", "addFirst(E)"}},
+		{"ArrayList#add", []string{"add(E)", "add(int,E)"}},
+		{"ArrayList#addf", []string{"addFirst(E)"}},
+		{"ArrayList#add(E)", []string{"add(E)"}},
+		{"ArrayList#ad(E)", nil},
+		{"ArrayList#add()", nil},
+		{"ArrayList#all", nil},
+		{"ArrayL#ad", nil},
+		{"ArrayList#addmissing", nil},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			q, err := parseQuery(tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := len(l.strings.ids)
+			var got []string
+			for _, match := range idx.search(q) {
+				got = append(got, strings.TrimPrefix(match.Label, "java.util.ArrayList#"))
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("members = %v; want %v", got, tc.want)
+			}
+			if len(l.strings.ids) != before {
+				t.Fatal("prefix lookup added strings to the table")
+			}
+		})
+	}
+	q, _ := parseQuery("ArrayList#ad")
+	want := idx.search(q)
+	future, err := l.buildIndex(25, l.root(25), types, append(slices.Clone(members), indexEntry{Package: "java.util", Class: "ArrayList", Label: "ad()"}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.search(q); !reflect.DeepEqual(got, want) {
+		t.Fatal("an exact member name in another version suppressed this version's prefix matches")
+	}
+	if got := future.search(q); len(got) != 1 || got[0].Label != "java.util.ArrayList#ad()" {
+		t.Fatalf("expected the future version's exact match, got %+v", got)
+	}
+}
 
 func TestParseQuery(t *testing.T) {
 	tests := []struct {
@@ -111,7 +173,11 @@ func TestVersionIndexSearch(t *testing.T) {
 		{"MAP.ENTRY", []result{{"java.util.Map.Entry", "https://docs.example/Map.Entry.html"}}},
 		{"java.util.Map.Entry", []result{{"java.util.Map.Entry", "https://docs.example/Map.Entry.html"}}},
 		{"Missing", nil}, {"String#missing", nil}, {"String#valueOf(long)", nil},
-		{"String#length(int)", nil}, {"String#value", nil},
+		{"String#length(int)", nil},
+		{"String#value", []result{
+			{"java.lang.String#valueOf(char[], int, int)", "https://docs.example/String.html#valueOf(char[],int,int)"},
+			{"java.lang.String#valueOf(int)", "https://docs.example/String.html#valueOf(int)"},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {

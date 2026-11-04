@@ -76,6 +76,21 @@ func TestLiveOracle(t *testing.T) {
 			if idx == nil {
 				t.Fatal("missing version")
 			}
+			prefix := idx.search(query{Class: "arraylist", Member: "ad"})
+			exact := idx.search(query{Class: "arraylist", Member: "add"})
+			if len(exact) == 0 || len(prefix) <= len(exact) {
+				t.Fatalf("ArrayList prefix should include more than the add overloads: prefix=%d exact=%d", len(prefix), len(exact))
+			}
+			for _, match := range prefix {
+				if !strings.HasPrefix(strings.ToLower(match.Label), "java.util.arraylist#ad") {
+					t.Errorf("unexpected prefix result: %s", match.Label)
+				}
+			}
+			for _, match := range exact {
+				if !strings.HasPrefix(match.Label, "java.util.ArrayList#add(") {
+					t.Errorf("exact match expanded to other names: %s", match.Label)
+				}
+			}
 			for _, input := range []string{
 				"optionallong#orelse", "optionallong#orelseget", "map.entry",
 				"string#valueof(char[],int,int)", "string#substring(int,int)",

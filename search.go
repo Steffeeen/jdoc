@@ -132,7 +132,17 @@ func (idx *versionIndex) search(q query) []result {
 			add(table.values[t.FQN], idx.Root+table.values[t.Path])
 			continue
 		}
-		for _, m := range t.Members[memberID] {
+		members := t.Members[memberID]
+		if len(members) == 0 && !signature {
+			// Expand prefixes only when this class has no exact member-name match.
+			members = nil
+			for id, overloads := range t.Members {
+				if strings.HasPrefix(table.values[id], name) {
+					members = append(members, overloads...)
+				}
+			}
+		}
+		for _, m := range members {
 			label := table.values[m.Signature]
 			if signature && q.Member != normalizeSignature(label) {
 				continue
