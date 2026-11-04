@@ -21,6 +21,13 @@ go build -o jdoc .
 
 Interrupt or SIGTERM shuts the server down gracefully. There are no external Go dependencies.
 
+## Docker
+
+```sh
+docker build -t jdoc .
+docker run --rm --name jdoc -p 127.0.0.1:8080:8080 jdoc
+```
+
 ## Search
 
 The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is exact and case-insensitive.
