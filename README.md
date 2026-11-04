@@ -28,6 +28,14 @@ docker build -t jdoc .
 docker run --rm --name jdoc -p 127.0.0.1:8080:8080 jdoc
 ```
 
+A GitHub action workflow also builds and publishes the Docker image:
+
+```sh
+docker run --rm --name jdoc -p 127.0.0.1:8080:8080 ghcr.io/steffeeen/jdoc:latest
+```
+
+Publishing uses the built-in `GITHUB_TOKEN` with `packages: write`; no registry secret is required. Repository or organization policies must allow that permission. GHCR packages can initially be private: make the package public in its GitHub package settings for anonymous pulls, or authenticate to GHCR before pulling a private image. If the package already exists, ensure this repository has write access to it.
+
 ## Search
 
 The only endpoint is `GET /?q=...`; `HEAD` is also supported. Class and member names are case-insensitive, with exact matches taking precedence over prefix matches. Explicit member signatures remain exact.
