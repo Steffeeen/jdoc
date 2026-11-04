@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>jdoc / JDK Javadoc search</title>
+<style>
+:root { color-scheme: light dark; --bg:#f4f1e9; --ink:#1b302b; --muted:#52655d; --line:#bbc6b9; --accent:#196448; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:ui-monospace,SFMono-Regular,Consolas,monospace; line-height:1.6; }
+main { max-width:860px; padding:72px 28px; margin:auto; }
+header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; border-top:4px solid var(--ink); padding-top:14px; margin-bottom:64px; }
+header a { font-size:25px; font-weight:700; text-decoration:none; color:inherit; }
+small, .hint, footer { color:var(--muted); }
+h1 { font-family:Georgia,serif; font-size:clamp(32px,6vw,52px); font-weight:400; line-height:1.15; margin:0 0 28px; }
+label { display:block; margin-bottom:8px; font-size:14px; }
+.search { display:flex; gap:10px; }
+input, button { font:inherit; border:1px solid var(--line); border-radius:0; padding:14px; }
+input { min-width:0; flex:1; background:transparent; color:inherit; }
+button { background:var(--ink); color:var(--bg); cursor:pointer; border-color:var(--ink); }
+input:focus-visible,button:focus-visible,a:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+.hint { font-size:13px; margin-top:16px; }
+.message { margin-top:32px; border-left:3px solid var(--accent); padding-left:16px; }
+ul { list-style:none; padding:0; margin:32px 0; }
+li { border-bottom:1px solid var(--line); }
+li a { display:block; padding:14px 0; overflow-wrap:anywhere; color:var(--accent); }
+footer { margin-top:64px; padding-top:18px; border-top:1px solid var(--line); font-size:12px; }
+@media (max-width:500px) { main { padding:28px 18px; } header { margin-bottom:44px; } .search { flex-direction:column; } button { align-self:flex-start; } }
+@media (prefers-color-scheme:dark) { :root { --bg:#14241f; --ink:#e4e8da; --muted:#a8b9ac; --line:#43564b; --accent:#9dd6af; } }
+</style>
+</head>
+<body><main>
+<form action="/" method="get">
+<label for="q">Class or class#member</label>
+<div class="search"><input id="q" name="q" value="{{.Query}}" placeholder="optionallong#orelse" maxlength="1024" required autocomplete="off" spellcheck="false"><button type="submit">Look up &rarr;</button></div>
+</form>
+{{if .Message}}<p class="message" role="status">{{.Message}}</p>{{end}}
+{{if .Results}}<ul aria-label="Matching Javadocs">{{range .Results}}<li><a href="{{.URL}}">{{.Label}}</a></li>{{end}}</ul>{{end}}
+<footer>Current default: JDK {{.Latest}}.</footer>
+</main></body></html>

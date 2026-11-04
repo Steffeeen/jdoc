@@ -1,0 +1,71 @@
+# jdoc
+
+A small Go service that redirects class and member searches to Oracle's JDK Javadocs. Supports JDK 9 onward, using the published search indices.
+
+## Run
+
+Requires Go 1.23 or newer and outbound HTTPS access to `docs.oracle.com`.
+
+```sh
+go run . -listen :8080
+```
+
+Open `http://localhost:8080/` for the search form. The server starts listening only after all available versions have been indexed. Startup can take a while and requires enough memory to hold every version's class and member indices. Indexing progress is logged to stderr. Failed downloads are retried twice for transient errors; an incomplete startup exits with an error.
+
+To build a binary:
+
+```sh
+go build -o jdoc .
+./jdoc -listen 127.0.0.1:8080
+```
+
+Interrupt or SIGTERM shuts the server down gracefully. There are no external Go dependencies.
+
+## Search
+
+The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is exact and case-insensitive.
+
+| Query | Meaning |
+| --- | --- |
+| `optionallong` | Class in the latest indexed JDK |
+| `optionallong#orelse` | Member on that class |
+| `17 optionallong` | Class in JDK 17 |
+| `optionallong 17` | Same, with a version suffix |
+| `17 optionallong#orelse` | Member in JDK 17 |
+| `java.util.optionallong` | Fully qualified class |
+| `map.entry` | Nested type |
+| `string#valueof` | All matching overloads |
+| `string#valueof(int)` | Specific overload |
+
+For direct URLs, encode `#` as `%23` and spaces as `%20` or `+`. The form handles encoding automatically. For example:
+
+```sh
+curl -i --get --data-urlencode 'q=17 optionallong#orelse' http://localhost:8080/
+```
+
+One match produces a `302` redirect. Ambiguous classes and overloads produce an HTML choices page. No match or an unindexed version returns `404`; invalid input returns `400`. Other paths return `404`, and unsupported methods return `405`.
+
+An unversioned query searches **only the latest indexed JDK**, with no fallback for removed APIs. Explicit versions never fall back. Member lookup covers declared indexed members, including fields and constructors, but does not resolve inherited members. For overloads, use the parameter types displayed in the choices page; signatures may vary between Javadoc versions.
+
+## Discovery
+
+At startup, the service loads versions sequentially from JDK 9. For each version it downloads `type-search-index.js`, `package-search-index.js`, and `member-search-index.js`.
+
+Discovery stops when the next version's type index returns `404`, or redirects to another version's Oracle JDK documentation landing page. Oracle uses that specific redirect for unavailable versions. Other redirects, invalid content, and HTTP errors fail discovery rather than marking a version unavailable.
+
+Every 24 hours after startup, the service probes the next version and indexes only missing versions until it reaches an unavailable one. Completed indices are published atomically; existing searches continue uninterrupted. A failed daily check is logged and retried the next day without discarding existing data. Existing versions are never reindexed until restart.
+
+**Availability means valid published Javadocs, not general availability. Early-access documentation can become the default.** Discovery assumes consecutive major versions with published indices starting at 9. There is no disk persistence: restarting downloads everything again.
+
+## Test
+
+```sh
+go test -race ./...
+go vet ./...
+```
+
+The default suite is offline. To discover every available version and verify representative class pages and method anchors against Oracle:
+
+```sh
+JDOC_LIVE=1 go test -run '^TestLiveOracle$' -v -timeout 12m
+```
