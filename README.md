@@ -30,7 +30,7 @@ docker run --rm --name jdoc -p 127.0.0.1:8080:8080 jdoc
 
 ## Search
 
-The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is case-insensitive. Class names are exact; member names fall back to prefix matching when the matched class has no exact member-name match. Explicit signatures remain exact.
+The only endpoint is `GET /?q=...`; `HEAD` is also supported. Class and member names are case-insensitive, with exact matches taking precedence over prefix matches. Explicit member signatures remain exact.
 
 | Query | Meaning |
 | --- | --- |
@@ -44,8 +44,12 @@ The only endpoint is `GET /?q=...`; `HEAD` is also supported. Matching is case-i
 | `string#valueof` | All matching overloads |
 | `string#valueof(int)` | Specific overload |
 | `arraylist#ad` | Members whose names start with `ad`, including their overloads |
+| `arrayl` | Types whose simple or qualified names start with `arrayl` |
+| `java.util.arrayl#ad` | Combined class and member prefixes |
 
-For example, `arraylist#ad` includes `add`, `addAll`, and other indexed `add...` members. `arraylist#add` matches only the exact `add` overloads, not `addAll`. Prefixes are checked against the matched class's existing member map without retaining an additional prefix index or adding query strings to the string table. Class-name prefixes and substring matching are not supported.
+Class names, qualified names, and nested-type aliases fall back to prefix matching only when there is no exact class match in the selected version. For example, `arrayl` finds `ArrayList`, while `map` matches `Map` without expanding to `Map.Entry`. Class and member prefixes can be combined.
+
+For example, `arraylist#ad` includes `add`, `addAll`, and other indexed `add...` members. `arraylist#add` matches only the exact `add` overloads, not `addAll`. Prefixes are checked against the existing class and member maps without retaining an additional prefix index or adding query strings to the string table. Substring matching is not supported.
 
 For direct URLs, encode `#` as `%23` and spaces as `%20` or `+`. The form handles encoding automatically. For example:
 

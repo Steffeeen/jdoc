@@ -76,6 +76,15 @@ func TestLiveOracle(t *testing.T) {
 			if idx == nil {
 				t.Fatal("missing version")
 			}
+			foundArrayList := false
+			for _, match := range idx.search(query{Class: "arrayl"}) {
+				if match.Label == "java.util.ArrayList" {
+					foundArrayList = true
+				}
+			}
+			if !foundArrayList {
+				t.Fatal("class prefix did not find java.util.ArrayList")
+			}
 			prefix := idx.search(query{Class: "arraylist", Member: "ad"})
 			exact := idx.search(query{Class: "arraylist", Member: "add"})
 			if len(exact) == 0 || len(prefix) <= len(exact) {
@@ -93,6 +102,7 @@ func TestLiveOracle(t *testing.T) {
 			}
 			for _, input := range []string{
 				"optionallong#orelse", "optionallong#orelseget", "map.entry",
+				"java.util.arrayl#isem", "map.ent", "optional",
 				"string#valueof(char[],int,int)", "string#substring(int,int)",
 				"threadpoolexecutor.abortpolicy#abortpolicy()", "arrays#aslist", "collections#reverse",
 			} {

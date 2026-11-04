@@ -77,6 +77,10 @@ func TestServeHTTPSearch(t *testing.T) {
 		contains    string
 	}{
 		{"latest class", "STRING", 302, "https://docs.example/21/String.html", ""},
+		{"class prefix", "STR", 302, "https://docs.example/21/String.html", ""},
+		{"qualified class prefix", "java.lang.str", 302, "https://docs.example/21/String.html", ""},
+		{"pinned class prefix", "str 17", 302, "https://docs.example/17/String.html", ""},
+		{"class and member prefixes", "str#len", 302, "https://docs.example/21/String.html#length()", ""},
 		{"qualified class", "java.lang.String", 302, "https://docs.example/21/String.html", ""},
 		{"unique method", "String#length", 302, "https://docs.example/21/String.html#length()", ""},
 		{"unique member prefix", "String#LEN", 302, "https://docs.example/21/String.html#length()", ""},

@@ -7,6 +7,77 @@ import (
 	"testing"
 )
 
+func TestClassPrefixSearch(t *testing.T) {
+	l := &loader{}
+	types := []indexEntry{
+		{Package: "java.util", Label: "ArrayList", Module: "java.base"},
+		{Package: "java.util", Label: "Arrays", Module: "java.base"},
+		{Package: "java.util", Label: "Map", Module: "java.base"},
+		{Package: "java.util", Label: "Map.Entry", Module: "java.base"},
+		{Package: "map", Label: "Maple", Module: "m"},
+	}
+	members := []indexEntry{
+		{Package: "java.util", Class: "ArrayList", Label: "add(E)"},
+		{Package: "java.util", Class: "Map.Entry", Label: "getKey()"},
+		{Package: "map", Class: "Maple", Label: "add(E)"},
+	}
+	idx, err := l.buildIndex(17, l.root(17), types, members, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		input string
+		want  []string
+	}{
+		{"ARRAYL", []string{"java.util.ArrayList"}},
+		{"arr", []string{"java.util.ArrayList", "java.util.Arrays"}},
+		{"java.util.arr", []string{"java.util.ArrayList", "java.util.Arrays"}},
+		{"map.ent", []string{"java.util.Map.Entry"}},
+		{"ent", []string{"java.util.Map.Entry"}},
+		{"ma", []string{"java.util.Map", "java.util.Map.Entry", "map.Maple"}},
+		{"map", []string{"java.util.Map"}},
+		{"map#ad", nil},
+		{"arr#ad", []string{"java.util.ArrayList#add(E)"}},
+		{"arr#add(E)", []string{"java.util.ArrayList#add(E)"}},
+		{"map.ent#getk", []string{"java.util.Map.Entry#getKey()"}},
+		{"ray", nil},
+		{"java.util.missing", nil},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			q, err := parseQuery(tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := len(l.strings.ids)
+			var labels []string
+			for _, match := range idx.search(q) {
+				labels = append(labels, match.Label)
+				if !strings.HasPrefix(match.URL, idx.Root) {
+					t.Errorf("incorrect version root in %s", match.URL)
+				}
+			}
+			if !slices.Equal(labels, tc.want) {
+				t.Errorf("labels = %v; want %v", labels, tc.want)
+			}
+			if len(l.strings.ids) != before {
+				t.Fatal("class-prefix search mutated the string table")
+			}
+		})
+	}
+	q, _ := parseQuery("array")
+	want := idx.search(q)
+	future, err := l.buildIndex(25, l.root(25), append(slices.Clone(types), indexEntry{Package: "java.util", Label: "Array", Module: "java.base"}), members, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.search(q); !reflect.DeepEqual(got, want) {
+		t.Fatal("a future exact class name suppressed the older version's prefix matches")
+	}
+	if got := future.search(q); len(got) != 1 || got[0].Label != "java.util.Array" {
+		t.Fatalf("expected future version's exact class match, got %+v", got)
+	}
+}
+
 func TestMemberPrefixSearch(t *testing.T) {
 	l := &loader{}
 	types := []indexEntry{{Package: "java.util", Label: "ArrayList", Module: "java.base"}}
@@ -33,7 +104,7 @@ func TestMemberPrefixSearch(t *testing.T) {
 		{"ArrayList#ad(E)", nil},
 		{"ArrayList#add()", nil},
 		{"ArrayList#all", nil},
-		{"ArrayL#ad", nil},
+		{"ArrayL#ad", []string{"ADDITIONS", "add(E)", "add(int,E)", "addAll(Collection)", "addFirst(E)"}},
 		{"ArrayList#addmissing", nil},
 	} {
 		t.Run(tc.input, func(t *testing.T) {

@@ -114,9 +114,14 @@ func (idx *versionIndex) search(q query) []result {
 	table := idx.Strings
 	table.mu.RLock()
 	defer table.mu.RUnlock()
-	classID, ok := table.ids[q.Class]
-	if !ok {
-		return results
+	types := idx.Types[table.ids[q.Class]]
+	if len(types) == 0 {
+		types = nil
+		for id, matches := range idx.Types {
+			if strings.HasPrefix(table.values[id], q.Class) {
+				types = append(types, matches...)
+			}
+		}
 	}
 	name, _, signature := strings.Cut(q.Member, "(")
 	memberID := table.ids[name]
@@ -127,7 +132,7 @@ func (idx *versionIndex) search(q query) []result {
 			seen[address] = true
 		}
 	}
-	for _, t := range idx.Types[classID] {
+	for _, t := range types {
 		if q.Member == "" {
 			add(table.values[t.FQN], idx.Root+table.values[t.Path])
 			continue
