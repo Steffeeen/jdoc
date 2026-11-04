@@ -13,7 +13,101 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 )
+
+func idxTestID(t *testing.T, table *stringTable, s string) stringID {
+	t.Helper()
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	id, ok := table.ids[s]
+	if !ok {
+		t.Fatalf("string %q is not interned", s)
+	}
+	return id
+}
+
+func TestIndexInterningAcrossVersions(t *testing.T) {
+	l := &loader{}
+	build := func(version int) *versionIndex {
+		t.Helper()
+		idx, err := l.buildIndex(version, fmt.Sprintf("https://docs.oracle.com/en/java/javase/%d/docs/api/", version),
+			[]indexEntry{{Package: "p", Label: "Outer.Inner"}, {Package: "p", Label: "Other"}},
+			[]indexEntry{
+				{Package: "p", Class: "Outer.Inner", Label: strings.Clone("f()")},
+				{Package: "p", Class: "Other", Label: strings.Clone("f()")},
+			}, []indexEntry{{Label: "p", Module: "m"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return idx
+	}
+	first := build(11)
+	size := len(l.strings.ids)
+	second := build(17)
+	if first.Strings != &l.strings || second.Strings != first.Strings {
+		t.Fatal("versions do not share the loader's string table")
+	}
+	if len(l.strings.ids) != size {
+		t.Errorf("identical content added table entries: %d -> %d", size, len(l.strings.ids))
+	}
+	shared := func(a, b stringID) {
+		t.Helper()
+		if a == 0 || a != b {
+			t.Errorf("strings do not share a nonzero ID: %d, %d", a, b)
+		}
+	}
+	for alias, types := range first.Types {
+		if len(second.Types[alias]) != len(types) {
+			t.Fatalf("alias %q missing from second index", l.strings.value(alias))
+		}
+		a, b := types[0], second.Types[alias][0]
+		shared(a.FQN, b.FQN)
+		shared(a.Path, b.Path)
+		if path := l.strings.value(a.Path); strings.Contains(path, "https:") || strings.Contains(path, "/docs/api/") {
+			t.Errorf("type stores full URL: %q", path)
+		}
+		for key, members := range a.Members {
+			if len(b.Members[key]) != len(members) {
+				t.Fatalf("member key %q missing from second index", l.strings.value(key))
+			}
+			shared(members[0].Signature, b.Members[key][0].Signature)
+			shared(members[0].Anchor, b.Members[key][0].Anchor)
+			shared(members[0].Signature, members[0].Anchor)
+		}
+	}
+	inner, other, f := idxTestID(t, &l.strings, "inner"), idxTestID(t, &l.strings, "other"), idxTestID(t, &l.strings, "f")
+	shared(first.Types[inner][0].Members[f][0].Signature, second.Types[other][0].Members[f][0].Signature)
+	for _, idx := range []*versionIndex{first, second} {
+		matches := idx.search(query{Class: "inner", Member: "f"})
+		if len(matches) != 1 || matches[0].URL != idx.Root+"m/p/Outer.Inner.html#f()" {
+			t.Errorf("incorrect version-specific destination: %+v", matches)
+		}
+	}
+}
+
+func TestIndexInternDoesNotRetainSubstring(t *testing.T) {
+	var table stringTable
+	if table.intern("") != 0 || table.value(0) != "" || len(table.ids) != 0 || len(table.values) != 0 {
+		t.Fatal("empty strings should not initialize the table")
+	}
+	source := strings.Repeat("x", 4096) + "member"
+	small := source[4096:]
+	id := table.intern(small)
+	canonical := table.value(id)
+	if canonical != small || unsafe.StringData(canonical) == unsafe.StringData(small) {
+		t.Fatal("interned string must own its storage instead of retaining source buffer")
+	}
+	if duplicate := table.intern(strings.Clone(small)); duplicate != id || unsafe.StringData(table.value(duplicate)) != unsafe.StringData(canonical) {
+		t.Fatal("equal strings must reuse canonical storage")
+	}
+	if id == 0 || table.intern("") != 0 || table.value(0) != "" || len(table.ids) != 1 || len(table.values) != 2 {
+		t.Fatal("empty strings should reserve ID zero without adding table entries")
+	}
+	if size := unsafe.Sizeof(member{}); size != 8 {
+		t.Fatalf("member size = %d; want 8", size)
+	}
+}
 
 func TestIndexDecodeWrappers(t *testing.T) {
 	for _, tc := range []struct {
@@ -76,7 +170,7 @@ func TestIndexBuildAnchorsAndAliases(t *testing.T) {
 				{Package: "java.util", Class: "Absent", Label: "ignored()"},
 				{Package: "java.util", Class: "Map.Entry"},
 			}
-			idx, err := buildIndex(version, root, types, members, []indexEntry{{Label: "java.util", Module: "java.base"}})
+			idx, err := (&loader{}).buildIndex(version, root, types, members, []indexEntry{{Label: "java.util", Module: "java.base"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +179,7 @@ func TestIndexBuildAnchorsAndAliases(t *testing.T) {
 			}
 			var typ *javaType
 			for _, alias := range []string{"java.util.map.entry", "map.entry", "entry"} {
-				got := idx.Types[alias]
+				got := idx.Types[idxTestID(t, idx.Strings, alias)]
 				if len(got) != 1 {
 					t.Fatalf("alias %q: %+v", alias, got)
 				}
@@ -98,20 +192,22 @@ func TestIndexBuildAnchorsAndAliases(t *testing.T) {
 			if version >= 11 {
 				page = "java.base/" + page
 			}
-			if typ.Name != "Map.Entry" || typ.FQN != "java.util.Map.Entry" || typ.URL != root+page {
+			if idx.Strings.value(typ.FQN) != "java.util.Map.Entry" || idx.Root != root || idx.Strings.value(typ.Path) != page {
 				t.Fatalf("type = %+v", typ)
 			}
 			constructor, method := "%3Cinit%3E(java.lang.String%5B%5D)", "put(java.lang.String,int%5B%5D)"
 			if version == 9 {
 				constructor, method = "Entry-java.lang.String:A-", "put-java.lang.String-int:A-"
 			}
-			want := map[string][]member{
-				"entry": {{Signature: "Entry(java.lang.String[])", Anchor: constructor}},
-				"put":   {{Signature: "put(java.lang.String, int[])", Anchor: method}, {Signature: "put(int)", Anchor: "put(int)"}},
-				"value": {{Signature: "VALUE", Anchor: "VALUE"}},
-			}
+			id := func(s string) stringID { return idxTestID(t, idx.Strings, s) }
+			putAnchor := "put(int)"
 			if version == 9 {
-				want["put"][1].Anchor = "put-int-"
+				putAnchor = "put-int-"
+			}
+			want := map[stringID][]member{
+				id("entry"): {{Signature: id("Entry(java.lang.String[])"), Anchor: id(constructor)}},
+				id("put"):   {{Signature: id("put(java.lang.String, int[])"), Anchor: id(method)}, {Signature: id("put(int)"), Anchor: id(putAnchor)}},
+				id("value"): {{Signature: id("VALUE"), Anchor: id("VALUE")}},
 			}
 			if !reflect.DeepEqual(typ.Members, want) {
 				t.Fatalf("members = %#v; want %#v", typ.Members, want)
@@ -129,17 +225,20 @@ func TestIndexBuildOverrides(t *testing.T) {
 		{"new overrides win", "", "custom/New%20Type.html", "old.html", "%3Cinit%3E(java.lang.String%5B%5D)", "old-anchor", "custom/New%20Type.html", "%3Cinit%3E(java.lang.String%5B%5D)"},
 		{"old overrides", "", "", "legacy/Outer.Inner.html", "", "custom%20anchor%23part%25", "legacy/Outer.Inner.html", "custom%20anchor%23part%25"},
 		{"literal constructor override", "", "custom.html", "", "<init>()", "", "custom.html", "%3Cinit%3E()"},
+		{"absolute page override", "", root + "custom/Outer.Inner.html", "", "<init>()", "", "custom/Outer.Inner.html", "%3Cinit%3E()"},
+		{"normalized page override", "", "custom/../Outer.Inner.html", "", "<init>()", "", "Outer.Inner.html", "%3Cinit%3E()"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			idx, err := buildIndex(25, root,
+			idx, err := (&loader{}).buildIndex(25, root,
 				[]indexEntry{{Package: "p", Label: "Outer.Inner", Module: tc.module, URL: tc.page, OldURL: tc.oldPage}},
 				[]indexEntry{{Package: "p", Class: "Outer.Inner", Label: "Inner()", URL: tc.anchor, OldURL: tc.oldAnchor}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			typ := idx.Types["inner"][0]
-			if typ.URL != root+tc.wantPage || typ.Members["inner"][0].Anchor != tc.wantAnchor {
-				t.Fatalf("URL = %q, member = %+v", typ.URL, typ.Members["inner"])
+			inner := idxTestID(t, idx.Strings, "inner")
+			typ := idx.Types[inner][0]
+			if idx.Root != root || idx.Strings.value(typ.Path) != tc.wantPage || idx.Strings.value(typ.Members[inner][0].Anchor) != tc.wantAnchor {
+				t.Fatalf("path = %q, member = %+v", idx.Strings.value(typ.Path), typ.Members[inner])
 			}
 		})
 	}
@@ -149,7 +248,7 @@ func TestIndexBuildRejectsIncompleteOrUnsafe(t *testing.T) {
 	root := "https://docs.oracle.com/en/java/javase/25/docs/api/"
 	for _, page := range []string{"https://evil.example/Type.html", "//evil.example/Type.html", "http://docs.oracle.com/en/java/javase/25/docs/api/T.html", "../T.html", "%2e%2e/T.html", "/elsewhere/T.html", "T.html?x=1", "T.html#member", "javascript:alert(1)", "%zz"} {
 		t.Run(page, func(t *testing.T) {
-			_, err := buildIndex(25, root, []indexEntry{{Package: "p", Label: "T", URL: page}}, []indexEntry{{Package: "p", Class: "T", Label: "f()"}}, nil)
+			_, err := (&loader{}).buildIndex(25, root, []indexEntry{{Package: "p", Label: "T", URL: page}}, []indexEntry{{Package: "p", Class: "T", Label: "f()"}}, nil)
 			if err == nil {
 				t.Errorf("accepted unsafe page %q", page)
 			}
@@ -168,7 +267,7 @@ func TestIndexBuildRejectsIncompleteOrUnsafe(t *testing.T) {
 		{"invalid anchor escape", []indexEntry{{Package: "p", Label: "T", Module: "m"}}, []indexEntry{{Package: "p", Class: "T", Label: "f()", URL: "%zz"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			idx, err := buildIndex(25, root, tc.types, tc.members, nil)
+			idx, err := (&loader{}).buildIndex(25, root, tc.types, tc.members, nil)
 			if err == nil || idx != nil {
 				t.Fatalf("buildIndex = %+v, %v", idx, err)
 			}
@@ -358,7 +457,8 @@ func TestIndexLoadReusesTypeProbe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if idx.Version != version || len(idx.Types["string"]) != 1 || len(idx.Types["string"][0].Members["length"]) != 1 {
+			class, method := idxTestID(t, idx.Strings, "string"), idxTestID(t, idx.Strings, "length")
+			if idx.Version != version || len(idx.Types[class]) != 1 || len(idx.Types[class][0].Members[method]) != 1 {
 				t.Fatalf("incomplete index: %+v", idx)
 			}
 			prefix := fmt.Sprintf("/javase/%d/docs/api/", version)
@@ -474,7 +574,7 @@ func TestIndexDiscoverIncompleteNotPublished(t *testing.T) {
 				fmt.Fprint(w, idxTestFixture(file))
 			})
 			c := &catalog{}
-			previous := &versionIndex{Version: 9, Types: map[string][]*javaType{}}
+			previous := &versionIndex{Version: 9, Strings: &l.strings, Types: map[stringID][]*javaType{}}
 			c.publish(previous)
 			err := l.discover(context.Background(), c)
 			if err == nil || errors.Is(err, errUnavailable) || !strings.Contains(err.Error(), "JDK 10") {
@@ -502,6 +602,8 @@ func TestIndexDiscoverIncompleteNotPublished(t *testing.T) {
 
 func TestIndexCatalogConcurrentAccess(t *testing.T) {
 	c := &catalog{}
+	var table stringTable
+	fqn, path, class, method, signature := table.intern("p.T"), table.intern("T.html"), table.intern("t"), table.intern("f"), table.intern("f()")
 	if idx, latest := c.get(0); idx != nil || latest != 0 {
 		t.Fatalf("zero catalog = %+v, %d", idx, latest)
 	}
@@ -514,8 +616,8 @@ func TestIndexCatalogConcurrentAccess(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for version := 9 + worker; version < 9+versions; version += 8 {
-				typ := &javaType{Name: "T", FQN: "p.T", URL: "https://example.invalid/T.html", Members: map[string][]member{"f": {{Signature: "f()", Anchor: "f()"}}}}
-				c.publish(&versionIndex{Version: version, Types: map[string][]*javaType{"t": {typ}}})
+				typ := &javaType{FQN: fqn, Path: path, Members: map[stringID][]member{method: {{Signature: signature, Anchor: signature}}}}
+				c.publish(&versionIndex{Version: version, Root: "https://example.invalid/", Strings: &table, Types: map[stringID][]*javaType{class: {typ}}})
 			}
 		}(worker)
 	}
@@ -532,7 +634,7 @@ func TestIndexCatalogConcurrentAccess(t *testing.T) {
 					return
 				}
 				last = latest
-				if idx != nil && idx.Types["t"][0].Members["f"][0].Anchor != "f()" {
+				if idx != nil && idx.Strings.value(idx.Types[class][0].Members[method][0].Anchor) != "f()" {
 					t.Error("incomplete published index")
 					return
 				}
@@ -552,14 +654,119 @@ func TestIndexCatalogConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestIndexSearchDuringConcurrentVersionLoads(t *testing.T) {
+	l := idxTestLoader(t, func(w http.ResponseWriter, r *http.Request) {
+		var version int
+		if _, err := fmt.Sscanf(r.URL.Path, "/en/java/javase/%d/docs/api/", &version); err != nil {
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		switch r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:] {
+		case "type-search-index.js":
+			fmt.Fprintf(w, `typeSearchIndex=[{"p":"java.lang","l":"String"},{"p":"java.lang","l":"New%d"}];`, version)
+		case "member-search-index.js":
+			fmt.Fprintf(w, `memberSearchIndex=[{"p":"java.lang","c":"String","l":"length()"},{"p":"java.lang","c":"New%d","l":"method%d()"}];`, version, version)
+		case "package-search-index.js":
+			fmt.Fprint(w, idxTestFixture("package-search-index.js"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	old, err := l.load(context.Background(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &catalog{}
+	c.publish(old)
+	stable := make(map[string]stringID)
+	for s, id := range l.strings.ids {
+		stable[s] = id
+	}
+	initialValues := len(l.strings.values)
+	want := []result{{Label: "java.lang.String#length()", URL: old.Root + "java.base/java/lang/String.html#length()"}}
+	checkSearches := func(worker, iteration int) {
+		t.Helper()
+		idx, _ := c.get(11)
+		if idx != old {
+			t.Error("old published index was replaced")
+			return
+		}
+		if got := idx.search(query{Class: "string", Member: "length()"}); !reflect.DeepEqual(got, want) {
+			t.Errorf("old version search = %+v; want %+v", got, want)
+		}
+		missing := fmt.Sprintf("missing%d_%d", worker, iteration)
+		for _, q := range []query{{Class: missing}, {Class: "string", Member: missing}} {
+			if got := idx.search(q); len(got) != 0 {
+				t.Errorf("unknown search %+v returned %+v", q, got)
+			}
+		}
+	}
+	checkSearches(0, 0)
+	if len(l.strings.ids) != len(stable) || len(l.strings.values) != initialValues {
+		t.Fatal("unknown searches mutated the table before growth")
+	}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			for i := 0; i < 2000; i++ {
+				checkSearches(worker, i)
+			}
+		}(worker)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for version := 12; version <= 43; version++ {
+			idx, err := l.load(context.Background(), version)
+			if err != nil {
+				t.Errorf("load version %d: %v", version, err)
+				return
+			}
+			if idx.Strings != old.Strings {
+				t.Error("new version does not share the old string table")
+			}
+			c.publish(idx)
+		}
+	}()
+	close(start)
+	wg.Wait()
+	if idx, latest := c.get(0); idx == nil || latest != 43 {
+		t.Fatalf("new versions were not published: %+v, %d", idx, latest)
+	}
+	if len(l.strings.values) <= initialValues {
+		t.Fatal("new versions did not grow the string table")
+	}
+	for s, id := range stable {
+		if got := idxTestID(t, &l.strings, s); got != id || l.strings.value(id) != s {
+			t.Errorf("ID changed across growth: %q was %d, now %d", s, id, got)
+		}
+	}
+	for s := range l.strings.ids {
+		if strings.HasPrefix(s, "missing") {
+			t.Errorf("concurrent unknown search interned %q", s)
+		}
+	}
+	ids, values := len(l.strings.ids), len(l.strings.values)
+	checkSearches(4, 0)
+	if len(l.strings.ids) != ids || len(l.strings.values) != values {
+		t.Fatal("unknown searches mutated the table after growth")
+	}
+}
+
 func TestIndexOverrideEscapingRoundTrip(t *testing.T) {
 	for _, anchor := range []string{"%3Cinit%3E(java.lang.String%5B%5D)", "with%20space", "literal%25percent", "hash%23inside", "unicode-%E2%82%AC"} {
-		idx, err := buildIndex(11, "https://docs.oracle.com/api/", []indexEntry{{Package: "p", Label: "T", Module: "m"}}, []indexEntry{{Package: "p", Class: "T", Label: "f()", URL: anchor}}, nil)
+		idx, err := (&loader{}).buildIndex(11, "https://docs.oracle.com/api/", []indexEntry{{Package: "p", Label: "T", Module: "m"}}, []indexEntry{{Package: "p", Class: "T", Label: "f()", URL: anchor}}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		typ := idx.Types["t"][0]
-		address, err := url.Parse(typ.URL + "#" + typ.Members["f"][0].Anchor)
+		typ := idx.Types[idxTestID(t, idx.Strings, "t")][0]
+		address, err := url.Parse(idx.Root + idx.Strings.value(typ.Path) + "#" + idx.Strings.value(typ.Members[idxTestID(t, idx.Strings, "f")][0].Anchor))
 		if err != nil {
 			t.Fatal(err)
 		}

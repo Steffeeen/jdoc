@@ -21,20 +21,21 @@ import (
 var errUnavailable = errors.New("version unavailable")
 
 type member struct {
-	Signature string
-	Anchor    string
+	Signature stringID
+	Anchor    stringID
 }
 
 type javaType struct {
-	Name    string
-	FQN     string
-	URL     string
-	Members map[string][]member
+	FQN     stringID
+	Path    stringID
+	Members map[stringID][]member
 }
 
 type versionIndex struct {
 	Version int
-	Types   map[string][]*javaType
+	Root    string
+	Strings *stringTable
+	Types   map[stringID][]*javaType
 }
 
 // Published indices are immutable; only the catalog changes during discovery.
@@ -70,6 +71,7 @@ type loader struct {
 	origin  string
 	retries int
 	backoff time.Duration
+	strings stringTable
 }
 
 func newLoader() *loader {
@@ -216,12 +218,12 @@ func safePage(root, relative string) (string, error) {
 	return u.String(), nil
 }
 
-func buildIndex(version int, root string, types, members, packages []indexEntry) (*versionIndex, error) {
+func (l *loader) buildIndex(version int, root string, types, members, packages []indexEntry) (*versionIndex, error) {
 	modules := make(map[string]string)
 	for _, p := range packages {
 		modules[p.Label] = p.Module
 	}
-	idx := &versionIndex{Version: version, Types: make(map[string][]*javaType)}
+	idx := &versionIndex{Version: version, Root: root, Strings: &l.strings, Types: make(map[stringID][]*javaType)}
 	byFQN := make(map[string]*javaType)
 	for _, e := range types {
 		if e.Package == "" || e.Label == "" {
@@ -249,11 +251,12 @@ func buildIndex(version int, root string, types, members, packages []indexEntry)
 		if byFQN[fqn] != nil {
 			continue
 		}
-		t := &javaType{Name: e.Label, FQN: fqn, URL: address, Members: make(map[string][]member)}
+		t := &javaType{FQN: l.strings.intern(fqn), Path: l.strings.intern(strings.TrimPrefix(address, root)), Members: make(map[stringID][]member)}
 		byFQN[fqn] = t
 		aliases := map[string]bool{strings.ToLower(fqn): true, strings.ToLower(e.Label): true, strings.ToLower(e.Label[strings.LastIndex(e.Label, ".")+1:]): true}
 		for alias := range aliases {
-			idx.Types[alias] = append(idx.Types[alias], t)
+			id := l.strings.intern(alias)
+			idx.Types[id] = append(idx.Types[id], t)
 		}
 	}
 	count := 0
@@ -282,8 +285,8 @@ func buildIndex(version int, root string, types, members, packages []indexEntry)
 		u := &url.URL{Fragment: decoded}
 		anchor = strings.TrimPrefix(u.String(), "#")
 		name, _, _ := strings.Cut(e.Label, "(")
-		key := strings.ToLower(name)
-		t.Members[key] = append(t.Members[key], member{Signature: e.Label, Anchor: anchor})
+		key := l.strings.intern(strings.ToLower(name))
+		t.Members[key] = append(t.Members[key], member{Signature: l.strings.intern(e.Label), Anchor: l.strings.intern(anchor)})
 		count++
 	}
 	if len(byFQN) == 0 || count == 0 {
@@ -325,7 +328,7 @@ func (l *loader) load(ctx context.Context, version int) (*versionIndex, error) {
 	if err := errors.Join(memberErr, packageErr); err != nil {
 		return nil, err
 	}
-	return buildIndex(version, l.root(version), types, members, packages)
+	return l.buildIndex(version, l.root(version), types, members, packages)
 }
 
 func (l *loader) discover(ctx context.Context, c *catalog) error {

@@ -67,47 +67,49 @@ func TestParseQueryInvalid(t *testing.T) {
 }
 
 func TestVersionIndexSearch(t *testing.T) {
-	str := &javaType{FQN: "java.lang.String", URL: "https://docs.example/String.html", Members: map[string][]member{
-		"length": {{Signature: "length()", Anchor: "length()"}},
-		"valueof": {
-			{Signature: "valueOf(int)", Anchor: "valueOf(int)"},
-			{Signature: "valueOf(char[], int, int)", Anchor: "valueOf(char[],int,int)"},
-			{Signature: "valueOf(int)", Anchor: "valueOf(int)"},
+	table := &stringTable{}
+	id := table.intern
+	str := &javaType{FQN: id("java.lang.String"), Path: id("String.html"), Members: map[stringID][]member{
+		id("length"): {{Signature: id("length()"), Anchor: id("length()")}},
+		id("valueof"): {
+			{Signature: id("valueOf(int)"), Anchor: id("valueOf(int)")},
+			{Signature: id("valueOf(char[], int, int)"), Anchor: id("valueOf(char[],int,int)")},
+			{Signature: id("valueOf(int)"), Anchor: id("valueOf(int)")},
 		},
 	}}
-	utilDate := &javaType{FQN: "java.util.Date", URL: "https://docs.example/util/Date.html", Members: map[string][]member{
-		"gettime": {{Signature: "getTime()", Anchor: "getTime()"}},
+	utilDate := &javaType{FQN: id("java.util.Date"), Path: id("util/Date.html"), Members: map[stringID][]member{
+		id("gettime"): {{Signature: id("getTime()"), Anchor: id("getTime()")}},
 	}}
-	sqlDate := &javaType{FQN: "java.sql.Date", URL: "https://docs.example/sql/Date.html", Members: map[string][]member{
-		"gettime": {{Signature: "getTime()", Anchor: "getTime()"}},
+	sqlDate := &javaType{FQN: id("java.sql.Date"), Path: id("sql/Date.html"), Members: map[stringID][]member{
+		id("gettime"): {{Signature: id("getTime()"), Anchor: id("getTime()")}},
 	}}
-	entry := &javaType{FQN: "java.util.Map.Entry", URL: "https://docs.example/Map.Entry.html"}
-	idx := &versionIndex{Types: map[string][]*javaType{
-		"string": {str, str}, "java.lang.string": {str},
-		"date": {utilDate, sqlDate, utilDate}, "java.sql.date": {sqlDate},
-		"map.entry": {entry}, "java.util.map.entry": {entry},
+	entry := &javaType{FQN: id("java.util.Map.Entry"), Path: id("Map.Entry.html")}
+	idx := &versionIndex{Root: "https://docs.example/", Strings: table, Types: map[stringID][]*javaType{
+		id("string"): {str, str}, id("java.lang.string"): {str},
+		id("date"): {utilDate, sqlDate, utilDate}, id("java.sql.date"): {sqlDate},
+		id("map.entry"): {entry}, id("java.util.map.entry"): {entry},
 	}}
 	tests := []struct {
 		input string
 		want  []result
 	}{
-		{"STRING", []result{{str.FQN, str.URL}}},
-		{"java.lang.String", []result{{str.FQN, str.URL}}},
-		{"String#length", []result{{str.FQN + "#length()", str.URL + "#length()"}}},
+		{"STRING", []result{{"java.lang.String", "https://docs.example/String.html"}}},
+		{"java.lang.String", []result{{"java.lang.String", "https://docs.example/String.html"}}},
+		{"String#length", []result{{"java.lang.String#length()", "https://docs.example/String.html#length()"}}},
 		{"String#valueOf", []result{
-			{str.FQN + "#valueOf(char[], int, int)", str.URL + "#valueOf(char[],int,int)"},
-			{str.FQN + "#valueOf(int)", str.URL + "#valueOf(int)"},
+			{"java.lang.String#valueOf(char[], int, int)", "https://docs.example/String.html#valueOf(char[],int,int)"},
+			{"java.lang.String#valueOf(int)", "https://docs.example/String.html#valueOf(int)"},
 		}},
-		{"String#VALUEOF( INT )", []result{{str.FQN + "#valueOf(int)", str.URL + "#valueOf(int)"}}},
-		{"String#valueOf(char[],int,int)", []result{{str.FQN + "#valueOf(char[], int, int)", str.URL + "#valueOf(char[],int,int)"}}},
-		{"Date", []result{{sqlDate.FQN, sqlDate.URL}, {utilDate.FQN, utilDate.URL}}},
+		{"String#VALUEOF( INT )", []result{{"java.lang.String#valueOf(int)", "https://docs.example/String.html#valueOf(int)"}}},
+		{"String#valueOf(char[],int,int)", []result{{"java.lang.String#valueOf(char[], int, int)", "https://docs.example/String.html#valueOf(char[],int,int)"}}},
+		{"Date", []result{{"java.sql.Date", "https://docs.example/sql/Date.html"}, {"java.util.Date", "https://docs.example/util/Date.html"}}},
 		{"Date#getTime()", []result{
-			{sqlDate.FQN + "#getTime()", sqlDate.URL + "#getTime()"},
-			{utilDate.FQN + "#getTime()", utilDate.URL + "#getTime()"},
+			{"java.sql.Date#getTime()", "https://docs.example/sql/Date.html#getTime()"},
+			{"java.util.Date#getTime()", "https://docs.example/util/Date.html#getTime()"},
 		}},
-		{"java.sql.Date", []result{{sqlDate.FQN, sqlDate.URL}}},
-		{"MAP.ENTRY", []result{{entry.FQN, entry.URL}}},
-		{"java.util.Map.Entry", []result{{entry.FQN, entry.URL}}},
+		{"java.sql.Date", []result{{"java.sql.Date", "https://docs.example/sql/Date.html"}}},
+		{"MAP.ENTRY", []result{{"java.util.Map.Entry", "https://docs.example/Map.Entry.html"}}},
+		{"java.util.Map.Entry", []result{{"java.util.Map.Entry", "https://docs.example/Map.Entry.html"}}},
 		{"Missing", nil}, {"String#missing", nil}, {"String#valueOf(long)", nil},
 		{"String#length(int)", nil}, {"String#value", nil},
 	}

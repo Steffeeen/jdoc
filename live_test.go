@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +29,42 @@ func TestLiveOracle(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, latest := c.get(0)
+	runtime.GC()
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	t.Logf("JDK 9-%d retained heap: %.2f MiB", latest, float64(memory.HeapAlloc)/(1<<20))
+	t.Logf("interned strings: %d", len(l.strings.ids))
+	// Fingerprint all searchable destinations to compare index representations.
+	digest := sha256.New()
+	for version := 9; version <= latest; version++ {
+		idx, _ := c.get(version)
+		aliases := make([]string, 0, len(idx.Types))
+		for alias := range idx.Types {
+			aliases = append(aliases, idx.Strings.value(alias))
+		}
+		sort.Strings(aliases)
+		for _, alias := range aliases {
+			for _, match := range idx.search(query{Class: alias}) {
+				fmt.Fprintf(digest, "%d %s %s %s\n", version, alias, match.Label, match.URL)
+			}
+			for _, typ := range idx.Types[l.strings.ids[alias]] {
+				if alias != strings.ToLower(idx.Strings.value(typ.FQN)) {
+					continue
+				}
+				names := make([]string, 0, len(typ.Members))
+				for name := range typ.Members {
+					names = append(names, idx.Strings.value(name))
+				}
+				sort.Strings(names)
+				for _, name := range names {
+					for _, match := range idx.search(query{Class: alias, Member: name}) {
+						fmt.Fprintf(digest, "%d %s %s %s\n", version, name, match.Label, match.URL)
+					}
+				}
+			}
+		}
+	}
+	t.Logf("search destination SHA-256: %x", digest.Sum(nil))
 	for version := 9; version <= latest; version++ {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			idx, _ := c.get(version)
@@ -67,4 +106,5 @@ func TestLiveOracle(t *testing.T) {
 			}
 		})
 	}
+	runtime.KeepAlive(l)
 }

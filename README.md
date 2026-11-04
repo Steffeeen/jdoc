@@ -59,6 +59,8 @@ Every 24 hours after startup, the service probes the next version and indexes on
 
 **Availability means valid published Javadocs, not general availability. Early-access documentation can become the default.** Discovery assumes consecutive major versions with published indices starting at 9. There is no disk persistence: restarting downloads everything again.
 
+Retained names, lookup keys, signatures, anchors, and relative class paths use 32-bit IDs into one string table shared across all versions, including versions discovered later. A string-to-ID map deduplicates strings and resolves queries, while a slice resolves IDs back to strings. ID zero represents the empty string. Searches hold a read lock while using the table; indexing takes a write lock when interning strings. Unknown searches never add entries. Each version stores its API root once; full destination URLs are assembled only for search results.
+
 ## Test
 
 ```sh
@@ -71,3 +73,5 @@ The default suite is offline. To discover every available version and verify rep
 ```sh
 JDOC_LIVE=1 go test -run '^TestLiveOracle$' -v -timeout 12m
 ```
+
+The live test also reports retained Go heap after garbage collection (including the string table) and a fingerprint of searchable destinations for comparing index representations. Heap usage is not the same as process RSS, which also includes runtime overhead and unused resident heap pages.

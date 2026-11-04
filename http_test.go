@@ -13,24 +13,26 @@ import (
 
 func httpTestCatalog() *catalog {
 	c := &catalog{latest: 21, versions: make(map[int]*versionIndex)}
+	table := &stringTable{}
+	id := table.intern
 	for _, version := range []int{17, 21} {
 		root := fmt.Sprintf("https://docs.example/%d/", version)
-		str := &javaType{FQN: "java.lang.String", URL: root + "String.html", Members: map[string][]member{
-			"length": {{Signature: "length()", Anchor: "length()"}},
-			"valueof": {
-				{Signature: "valueOf(int)", Anchor: "valueOf(int)"},
-				{Signature: "valueOf(char[])", Anchor: "valueOf(char[])"},
+		str := &javaType{FQN: id("java.lang.String"), Path: id("String.html"), Members: map[stringID][]member{
+			id("length"): {{Signature: id("length()"), Anchor: id("length()")}},
+			id("valueof"): {
+				{Signature: id("valueOf(int)"), Anchor: id("valueOf(int)")},
+				{Signature: id("valueOf(char[])"), Anchor: id("valueOf(char[])")},
 			},
 		}}
-		idx := &versionIndex{Version: version, Types: map[string][]*javaType{
-			"string": {str}, "java.lang.string": {str},
-			"date": {
-				{FQN: "java.util.Date", URL: root + "util/Date.html"},
-				{FQN: "java.sql.Date", URL: root + "sql/Date.html"},
+		idx := &versionIndex{Version: version, Root: root, Strings: table, Types: map[stringID][]*javaType{
+			id("string"): {str}, id("java.lang.string"): {str},
+			id("date"): {
+				{FQN: id("java.util.Date"), Path: id("util/Date.html")},
+				{FQN: id("java.sql.Date"), Path: id("sql/Date.html")},
 			},
 		}}
 		if version == 17 {
-			idx.Types["legacy"] = []*javaType{{FQN: "example.Legacy", URL: root + "Legacy.html"}}
+			idx.Types[id("legacy")] = []*javaType{{FQN: id("example.Legacy"), Path: id("Legacy.html")}}
 		}
 		c.versions[version] = idx
 	}
@@ -174,7 +176,7 @@ func TestServeHTTPFocusAndNavigation(t *testing.T) {
 				t.Error("first result does not receive autofocus")
 			}
 			script := regexp.MustCompile(`<script nonce="([^"]+)">`).FindStringSubmatch(body)
-			if len(script) != 2 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'nonce-"+script[1]+"'") {
+			if len(script) != 2 || !strings.Contains(w.Header().Get("Content-Security-Policy"), "script-src 'nonce-"+html.UnescapeString(script[1])+"'") {
 				t.Fatal("navigation script must have a nonce authorized by CSP")
 			}
 			for _, key := range []string{"ArrowDown", "ArrowUp", "Home", "End"} {

@@ -107,6 +107,19 @@ type result struct {
 
 func (idx *versionIndex) search(q query) []result {
 	var results []result
+	if len(idx.Types) == 0 {
+		return results
+	}
+	// Keep both table directions stable for the lookup and result construction.
+	table := idx.Strings
+	table.mu.RLock()
+	defer table.mu.RUnlock()
+	classID, ok := table.ids[q.Class]
+	if !ok {
+		return results
+	}
+	name, _, signature := strings.Cut(q.Member, "(")
+	memberID := table.ids[name]
 	seen := make(map[string]bool)
 	add := func(label, address string) {
 		if !seen[address] {
@@ -114,17 +127,17 @@ func (idx *versionIndex) search(q query) []result {
 			seen[address] = true
 		}
 	}
-	for _, t := range idx.Types[q.Class] {
+	for _, t := range idx.Types[classID] {
 		if q.Member == "" {
-			add(t.FQN, t.URL)
+			add(table.values[t.FQN], idx.Root+table.values[t.Path])
 			continue
 		}
-		name, _, signature := strings.Cut(q.Member, "(")
-		for _, m := range t.Members[name] {
-			if signature && q.Member != normalizeSignature(m.Signature) {
+		for _, m := range t.Members[memberID] {
+			label := table.values[m.Signature]
+			if signature && q.Member != normalizeSignature(label) {
 				continue
 			}
-			add(t.FQN+"#"+m.Signature, t.URL+"#"+m.Anchor)
+			add(table.values[t.FQN]+"#"+label, idx.Root+table.values[t.Path]+"#"+table.values[m.Anchor])
 		}
 	}
 	sort.Slice(results, func(i, j int) bool { return results[i].Label < results[j].Label })
