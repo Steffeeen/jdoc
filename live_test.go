@@ -34,6 +34,11 @@ func TestLiveOracle(t *testing.T) {
 	runtime.ReadMemStats(&memory)
 	t.Logf("JDK 9-%d retained heap: %.2f MiB", latest, float64(memory.HeapAlloc)/(1<<20))
 	t.Logf("interned strings: %d", len(l.strings.ids))
+	classCount := 0
+	for _, variants := range l.classes {
+		classCount += len(variants)
+	}
+	t.Logf("shared class records: %d", classCount)
 	// Fingerprint all searchable destinations to compare index representations.
 	digest := sha256.New()
 	for version := 9; version <= latest; version++ {

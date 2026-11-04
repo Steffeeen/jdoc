@@ -61,6 +61,8 @@ Every 24 hours after startup, the service probes the next version and indexes on
 
 Retained names, lookup keys, signatures, anchors, and relative class paths use 32-bit IDs into one string table shared across all versions, including versions discovered later. A string-to-ID map deduplicates strings and resolves queries, while a slice resolves IDs back to strings. ID zero represents the empty string. Searches hold a read lock while using the table; indexing takes a write lock when interning strings. Unknown searches never add entries. Each version stores its API root once; full destination URLs are assembled only for search results.
 
+Complete class records are also shared across versions when their fully qualified name, relative path, and entire member map match. The indexing-only cache groups variants by class-name ID and compares their contents exactly. Deduplication happens after a version has been fully built and validated, before publication; existing shared records are never modified. Changed classes get separate records, and their per-version lookup maps still select the correct variant. Member maps and individual overload slices are not deduplicated independently.
+
 ## Test
 
 ```sh

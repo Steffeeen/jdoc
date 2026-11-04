@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,6 +73,29 @@ type loader struct {
 	retries int
 	backoff time.Duration
 	strings stringTable
+	classes map[stringID][]*javaType
+}
+
+// Only sequential indexing touches this cache. Shared records are never mutated.
+func (l *loader) shareClass(t *javaType) *javaType {
+variants:
+	for _, existing := range l.classes[t.FQN] {
+		if existing.Path != t.Path || len(existing.Members) != len(t.Members) {
+			continue
+		}
+		for name, members := range t.Members {
+			other, ok := existing.Members[name]
+			if !ok || !slices.Equal(members, other) {
+				continue variants
+			}
+		}
+		return existing
+	}
+	if l.classes == nil {
+		l.classes = make(map[stringID][]*javaType)
+	}
+	l.classes[t.FQN] = append(l.classes[t.FQN], t)
+	return t
 }
 
 func newLoader() *loader {
@@ -291,6 +315,15 @@ func (l *loader) buildIndex(version int, root string, types, members, packages [
 	}
 	if len(byFQN) == 0 || count == 0 {
 		return nil, errors.New("index contains no searchable types or members")
+	}
+	shared := make(map[*javaType]*javaType, len(byFQN))
+	for _, t := range byFQN {
+		shared[t] = l.shareClass(t)
+	}
+	for _, types := range idx.Types {
+		for i, t := range types {
+			types[i] = shared[t]
+		}
 	}
 	return idx, nil
 }
